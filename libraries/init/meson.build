@@ -14,7 +14,8 @@ libinit_arm7 = library('init_arm7',
     include_directories: nitrosdk_includes,
     pic: false,
     sources: [libinit_arm7_srcs, fx_const_h],
-    dependencies: [nitrosdk_arm7_args_dep]
+    dependencies: [nitrosdk_arm7_args_dep],
+    c_args: ['-wrap:sdk', '2.0/sp2p3', '-USP1P3_BUG_FOR_CONDITIONAL_ASM_INSTRUCTIONS']
 )
 
 crt0_obj_arm7 = libinit_arm7.extract_all_objects(recursive: true)

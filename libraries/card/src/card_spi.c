@@ -19,6 +19,9 @@
 #define MCCNT0_MASTER_ON       0x8000
 #define MCCNT0_MASTER_OFF      0x0000
 
+#define CARD_BACKUP_TYPE_VENDOR_IRC 0xFF
+static u8 IRC_BACKUP_WAIT = 50;
+
 typedef struct {
 	u32 rest_comm;
 	u32 src;
@@ -114,22 +117,57 @@ static BOOL CARDi_WaitPrevCommand (void)
 	return TRUE;
 }
 
-void CARDi_CommArray (const void *src, void *dst, u32 len, void (*func)(CARDiParam *))
+static BOOL need_command = TRUE;
+
+void CARDi_CommArray(const void *src, void *dst, u32 len, void (*func) (CARDiParam *))
 {
-	CARDiParam *const p = &cardi_param;
-	p->src = (u32)src;
-	p->dst = (u32)dst;
-	CARDi_EnableSpi(CSPI_CONTINUOUS_ON);
-	for (; len > 0; --len) {
-		if (!--p->rest_comm) {
-			CARDi_EnableSpi(CSPI_CONTINUOUS_OFF);
-		}
-		CARDi_WaitBusy();
-		(*func)(p);
-	}
-	if (!p->rest_comm) {
-		reg_MI_MCCNT0 = (u16)(MCCNT0_MASTER_OFF | MCCNT0_INT_OFF);
-	}
+    CARDiParam *const p = &cardi_param;
+    p->src = (u32)src;
+    p->dst = (u32)dst;
+
+    CARDi_EnableSpi(CSPI_CONTINUOUS_ON | MCCNT0_SPI_CLK_4M);
+
+    for (; len > 0; --len)
+    {
+        if(need_command)
+        {
+            CARDiCommandArg *const arg = cardi_common.cmd;
+            BOOL isIRC = ((u8)((arg->type >> CARD_BACKUP_TYPE_VENDER_SHIFT) & CARD_BACKUP_TYPE_VENDER_MASK) == CARD_BACKUP_TYPE_VENDOR_IRC) ? TRUE : FALSE;
+            if(isIRC)
+            {
+                vu16 dummy_read;
+
+                OSTick tick = OS_GetTick();
+                while (OS_TicksToMicroSeconds(OS_GetTick() - tick) < IRC_BACKUP_WAIT) {
+                }
+                CARDi_EnableSpi(CSPI_CONTINUOUS_ON | MCCNT0_SPI_CLK_1M);
+                CARDi_WaitBusy();
+                reg_MI_MCD0 = 0x00;
+                CARDi_WaitBusy();
+                dummy_read = reg_MI_MCD0;
+                need_command = FALSE;
+                tick = OS_GetTick();
+                while (OS_TicksToMicroSeconds(OS_GetTick() - tick) < IRC_BACKUP_WAIT) {
+                }
+            }
+        }
+        if (!--p->rest_comm)
+        {
+            CARDi_EnableSpi(CSPI_CONTINUOUS_OFF | MCCNT0_SPI_CLK_4M);
+            need_command = TRUE;
+        } else {
+            CARDi_EnableSpi(CSPI_CONTINUOUS_ON | MCCNT0_SPI_CLK_4M);
+        }
+        CARDi_WaitBusy();
+        (*func) (p);
+        if (!p->rest_comm) {
+            break;
+        }
+    }
+    if (!p->rest_comm)
+    {
+        reg_MI_MCCNT0 = (u16)(MCCNT0_MASTER_OFF | MCCNT0_INT_OFF | MCCNT0_SPI_CLK_4M);
+    }
 }
 
 void CARDi_CommReadCore (CARDiParam *p)
